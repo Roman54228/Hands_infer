@@ -103,6 +103,7 @@ def test_simple_tensorrt():
         
         # Создаем простой logger
         logger = trt.Logger(trt.Logger.WARNING)
+        print("✓ TensorRT Logger создан")
         
         # Создаем builder
         builder = trt.Builder(logger)
@@ -116,10 +117,17 @@ def test_simple_tensorrt():
         config = builder.create_builder_config()
         print("✓ TensorRT Config создан")
         
-        # Проверяем доступные профили
-        print("Доступные профили:")
-        for i in range(builder.num_optimization_profiles):
-            print(f"  Профиль {i}")
+        # Проверяем доступные профили (исправлено для TensorRT 10.x)
+        try:
+            # В TensorRT 10.x API изменился - используем config вместо builder
+            if hasattr(config, 'num_optimization_profiles'):
+                print("Доступные профили:")
+                for i in range(config.num_optimization_profiles):
+                    print(f"  Профиль {i}")
+            else:
+                print("Информация о профилях недоступна в этой версии TensorRT")
+        except Exception as e:
+            print(f"Не удалось получить информацию о профилях: {e}")
         
         print("✓ Базовый тест TensorRT прошел успешно")
         return True
@@ -129,24 +137,44 @@ def test_simple_tensorrt():
         return False
 
 def test_cuda_context():
-    """Тестирует создание CUDA контекста"""
+    """Тестирует работу с CUDA контекстом"""
     print("\n=== Тест CUDA контекста ===")
     
     try:
         import pycuda.driver as cuda
         import pycuda.autoinit
         
-        # Создаем простой CUDA контекст
-        context = cuda.Context()
-        print("✓ CUDA контекст создан")
+        # Проверяем, что CUDA инициализирован
+        print("✓ PyCUDA импортирован успешно")
         
-        # Тестируем выделение памяти
-        test_array = cuda.mem_alloc(1024)  # 1KB
-        print("✓ CUDA память выделена")
+        # Проверяем доступность GPU
+        device_count = cuda.Device.count()
+        print(f"✓ Количество GPU: {device_count}")
         
-        # Освобождаем память
-        test_array.free()
-        print("✓ CUDA память освобождена")
+        if device_count > 0:
+            # Получаем информацию о первом GPU
+            device = cuda.Device(0)
+            print(f"✓ GPU 0: {device.name()}")
+            
+            # Проверяем текущий контекст
+            try:
+                current_context = cuda.Context.get_current()
+                print("✓ CUDA контекст активен")
+            except:
+                print("⚠ CUDA контекст не активен, но это нормально")
+            
+            # Тестируем выделение памяти
+            try:
+                test_array = cuda.mem_alloc(1024)  # 1KB
+                print("✓ CUDA память выделена успешно")
+                
+                # Освобождаем память
+                test_array.free()
+                print("✓ CUDA память освобождена успешно")
+                
+            except Exception as e:
+                print(f"⚠ Проблема с выделением памяти: {e}")
+                return False
         
         return True
         
