@@ -62,42 +62,88 @@ def run_model_once(image, runner: TrtRunner):
     return keypoints_3d[0], inference_time  # возвращаем [21, 3]
 
 
-def run_model_batch(images, runner: TrtRunner, image_size = 256):
+def run_model_batch(images, runner: TrtRunner, image_size = 256, max_batch_size = 4):
     """
     Принимает список изображений (1, 2, ... N) и делает inference батчом.
+    Автоматически разбивает большие batch на меньшие части для совместимости с TensorRT профилями.
 
     Параметры:
         images: список из PIL.Image или numpy.ndarray
         runner: TrtRunner
+        image_size: размер изображения для ресайза
+        max_batch_size: максимальный размер batch (по умолчанию 4 для совместимости с TensorRT профилями)
 
     Возвращает:
         keypoints_3d: np.ndarray [N, 21, 3]
         inference_time: float
     """
-    batch = []
-    for img in images:
-        if isinstance(img, np.ndarray):
-            pass
-        elif isinstance(img, Image.Image):
-            img = np.array(img)
-        else:
-            raise ValueError("...")
+    if not images:
+        return np.array([]), 0.0
+    
+    # Если количество изображений меньше или равно max_batch_size, обрабатываем как обычно
+    if len(images) <= max_batch_size:
+        batch = []
+        for img in images:
+            if isinstance(img, np.ndarray):
+                pass
+            elif isinstance(img, Image.Image):
+                img = np.array(img)
+            else:
+                raise ValueError("Изображение должно быть PIL.Image или numpy.ndarray")
 
-        img = cv2.resize(img, (image_size, image_size))
-        img = img.transpose(2, 0, 1).astype(np.float32) / 255.0  # [3, H, W]
-        batch.append(img)
+            img = cv2.resize(img, (image_size, image_size))
+            img = img.transpose(2, 0, 1).astype(np.float32) / 255.0  # [3, H, W]
+            batch.append(img)
 
-    input_tensor = np.stack(batch)  # [N, 3, 256, 256]
+        input_tensor = np.stack(batch)  # [N, 3, H, W]
 
-    with runner:
-        input_name = runner.engine[0]
-        output_name = runner.engine[1]
+        with runner:
+            input_name = runner.engine[0]
+            output_name = runner.engine[1]
 
-        start_time = time.time()
-        outputs = runner.infer({input_name: input_tensor})
-        inference_time = time.time() - start_time
+            start_time = time.time()
+            outputs = runner.infer({input_name: input_tensor})
+            inference_time = time.time() - start_time
 
-    return outputs[output_name], inference_time  # [N, 21, 3]
+        return outputs[output_name], inference_time  # [N, 21, 3]
+    
+    # Если изображений больше max_batch_size, разбиваем на части
+    all_outputs = []
+    total_inference_time = 0.0
+    
+    for i in range(0, len(images), max_batch_size):
+        batch_images = images[i:i + max_batch_size]
+        
+        batch = []
+        for img in batch_images:
+            if isinstance(img, np.ndarray):
+                pass
+            elif isinstance(img, Image.Image):
+                img = np.array(img)
+            else:
+                raise ValueError("Изображение должно быть PIL.Image или numpy.ndarray")
+
+            img = cv2.resize(img, (image_size, image_size))
+            img = img.transpose(2, 0, 1).astype(np.float32) / 255.0  # [3, H, W]
+            batch.append(img)
+
+        input_tensor = np.stack(batch)  # [N, 3, H, W]
+
+        with runner:
+            input_name = runner.engine[0]
+            output_name = runner.engine[1]
+
+            start_time = time.time()
+            outputs = runner.infer({input_name: input_tensor})
+            batch_inference_time = time.time() - start_time
+            total_inference_time += batch_inference_time
+
+        all_outputs.append(outputs[output_name])
+    
+    # Объединяем результаты всех batch
+    final_output = np.concatenate(all_outputs, axis=0)  # [N, 21, 3]
+    
+    return final_output, total_inference_time
 
 if __name__ == 'main':
     model = load_hand_gesture_model("kps.engine")
