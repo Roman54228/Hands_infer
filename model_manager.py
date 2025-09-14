@@ -12,6 +12,7 @@ import multiprocessing as mp
 from ultralytics import YOLO
 from run_trt import load_hand_gesture_model, predict_hand_gesture
 from new_speed_bench import run_model_batch
+from tensorrt_streams import ParallelTensorRTManager
 
 
 def predict_gestures_process(crops: List[np.ndarray], model_path: str, image_size: int = 224) -> List[int]:
@@ -42,7 +43,7 @@ def predict_keypoints_process(crops: List[np.ndarray], model_path: str, image_si
         return []
 
 
-class ThreadSafeTensorRTModel:
+class vThreadSafeTensorRTModel:
     """Thread-safe обертка для TensorRT модели"""
     
     def __init__(self, engine_path: str):
@@ -85,6 +86,9 @@ class ModelManager:
         self.thread_safe_gesture_model = None
         self.thread_safe_kps_model = None
         
+        # CUDA streams менеджер для параллельного выполнения
+        self.parallel_manager = None
+        
         # Цвета для разных классов жестов
         self.gesture_colors = {
             0: (255, 0, 0),      # 2_hands
@@ -108,11 +112,16 @@ class ModelManager:
             print("Loading keypoints model...")
             self.kps_model = load_hand_gesture_model(kps_path)
             
-            # Создаем thread-safe версии для параллельного выполнения
+            # Создаем CUDA streams менеджер для параллельного выполнения
             if self.use_parallel:
-                print("Creating thread-safe models for parallel execution...")
-                self.thread_safe_gesture_model = ThreadSafeTensorRTModel(hand_gesture_path)
-                self.thread_safe_kps_model = ThreadSafeTensorRTModel(kps_path)
+                print("Creating CUDA streams manager for parallel execution...")
+                try:
+                    self.parallel_manager = ParallelTensorRTManager(hand_gesture_path, kps_path)
+                    print("✓ CUDA streams manager created successfully")
+                except Exception as e:
+                    print(f"⚠ Failed to create CUDA streams manager: {e}")
+                    print("Falling back to sequential execution")
+                    self.use_parallel = False
             
             print("All models loaded successfully!")
             
@@ -210,11 +219,32 @@ class ModelManager:
                 
         except Exception as e:
             print(f"Error in parallel prediction: {e}")
+            print("Falling back to sequential execution...")
             # Fallback к последовательному выполнению
             gesture_predictions = self.predict_gestures(crops, 224)
             keypoint_predictions = self.predict_keypoints(crops, 256)
         
         return gesture_predictions, keypoint_predictions
+    
+    def predict_gestures_and_keypoints_cuda_streams(self, crops: List[np.ndarray]) -> Tuple[List[int], List[np.ndarray]]:
+        """Параллельное предсказание с использованием CUDA streams"""
+        if not crops:
+            return [], []
+        
+        if self.parallel_manager is None:
+            print("CUDA streams manager not available, falling back to sequential execution")
+            gestures = self.predict_gestures(crops, image_size=224)
+            keypoints = self.predict_keypoints(crops, image_size=256)
+            return gestures, keypoints
+        
+        try:
+            return self.parallel_manager.predict_parallel(crops)
+        except Exception as e:
+            print(f"Error in CUDA streams prediction: {e}")
+            print("Falling back to sequential execution...")
+            gestures = self.predict_gestures(crops, image_size=224)
+            keypoints = self.predict_keypoints(crops, image_size=256)
+            return gestures, keypoints
     
     def predict_gestures_and_keypoints_parallel_threads(self, crops: List[np.ndarray]) -> Tuple[List[int], List[np.ndarray]]:
         """Параллельное предсказание жестов и ключевых точек с использованием потоков (альтернативный метод)"""
@@ -260,14 +290,52 @@ class ModelManager:
     
     def predict_gestures_and_keypoints(self, crops: List[np.ndarray]) -> Tuple[List[int], List[np.ndarray]]:
         """Универсальный метод для предсказания жестов и ключевых точек"""
-        if self.use_parallel:
-            # Используем ProcessPoolExecutor для избежания конфликтов CUDA
-            return self.predict_gestures_and_keypoints_parallel(crops)
+        if self.use_parallel and self.parallel_manager is not None:
+            # Используем CUDA streams для параллельного выполнения
+            return self.predict_gestures_and_keypoints_cuda_streams(crops)
         else:
-            # Последовательное выполнение
+            # Последовательное выполнение (надежное)
             gestures = self.predict_gestures(crops, image_size=224)
             keypoints = self.predict_keypoints(crops, image_size=256)
             return gestures, keypoints
+    
+    def predict_gestures_and_keypoints_optimized(self, crops: List[np.ndarray]) -> Tuple[List[int], List[np.ndarray]]:
+        """Оптимизированное предсказание с батчингом (альтернатива параллельному выполнению)"""
+        if not crops:
+            return [], []
+        
+        # Используем батчинг для ускорения
+        batch_size = min(8, len(crops))  # Ограничиваем размер батча
+        
+        gesture_predictions = []
+        keypoint_predictions = []
+        
+        # Обрабатываем батчами
+        for i in range(0, len(crops), batch_size):
+            batch_crops = crops[i:i + batch_size]
+            
+            # Предсказание жестов
+            try:
+                output_gestures = run_model_batch(batch_crops, self.hand_gesture_model, image_size=224)
+                batch_gestures = [pred.argmax() for pred in output_gestures[0]]
+                gesture_predictions.extend(batch_gestures)
+            except Exception as e:
+                print(f"Error in gesture batch {i//batch_size}: {e}")
+                gesture_predictions.extend([0] * len(batch_crops))  # Fallback
+            
+            # Предсказание ключевых точек
+            try:
+                output_keypoints = run_model_batch(batch_crops, self.kps_model, image_size=256)
+                batch_keypoints = []
+                for pred in output_keypoints[0]:
+                    kps = np.expand_dims(pred, 0)[:, :, :2] * 256
+                    batch_keypoints.append(kps[0])
+                keypoint_predictions.extend(batch_keypoints)
+            except Exception as e:
+                print(f"Error in keypoints batch {i//batch_size}: {e}")
+                keypoint_predictions.extend([np.zeros((21, 2))] * len(batch_crops))  # Fallback
+        
+        return gesture_predictions, keypoint_predictions
     
     def _predict_gestures_batch(self, crops: List[np.ndarray], image_size) -> List[int]:
         """Внутренний метод для предсказания жестов"""
