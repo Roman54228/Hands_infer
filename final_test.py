@@ -27,8 +27,8 @@ def test_model_manager():
         # Инициализация ModelManager
         print("Инициализация ModelManager...")
         model_manager = ModelManager(
-            yolo_model_path="yolo11n.engine",  # Может не существовать, но это ок
-            hand_gesture_model_path="mobilenetv3_hand_cls.engine",
+            yolo_model_path="upside.engine",  # Может не существовать, но это ок
+            hand_gesture_model_path="best_cls_kps.engine",
             kps_model_path="kps.engine",
             use_parallel=True,
             parallel_workers=2
