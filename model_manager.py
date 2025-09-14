@@ -43,7 +43,7 @@ def predict_keypoints_process(crops: List[np.ndarray], model_path: str, image_si
         return []
 
 
-class vThreadSafeTensorRTModel:
+class ThreadSafeTensorRTModel:
     """Thread-safe обертка для TensorRT модели"""
     
     def __init__(self, engine_path: str):
