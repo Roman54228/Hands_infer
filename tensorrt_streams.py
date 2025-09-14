@@ -73,8 +73,8 @@ class TensorRTStreamRunner:
         """Проверяет, инициализирована ли модель"""
         return self.runner is not None and self.initialization_error is None
     
-    def run_batch(self, images: List[np.ndarray], image_size: int = 256) -> Tuple[np.ndarray, float]:
-        """Выполнение батча изображений"""
+    def run_batch(self, images: List[np.ndarray], image_size: int = 256, max_batch_size: int = 4) -> Tuple[np.ndarray, float]:
+        """Выполнение батча изображений с автоматическим разбиением больших batch"""
         if not images:
             return np.array([]), 0.0
         
@@ -82,53 +82,74 @@ class TensorRTStreamRunner:
             raise RuntimeError(f"Модель не инициализирована: {self.initialization_error}")
         
         try:
-            # Подготовка батча
-            batch = []
-            for img in images:
-                if isinstance(img, np.ndarray):
-                    img_resized = cv2.resize(img, (image_size, image_size))
-                    img_normalized = img_resized.transpose(2, 0, 1).astype(np.float32) / 255.0
-                    batch.append(img_normalized)
+            # Если количество изображений меньше или равно max_batch_size, обрабатываем как обычно
+            if len(images) <= max_batch_size:
+                return self._run_single_batch(images, image_size)
             
-            input_tensor = np.stack(batch)  # [N, 3, H, W]
+            # Если изображений больше max_batch_size, разбиваем на части
+            all_outputs = []
+            total_inference_time = 0.0
             
-            # Выполнение inference
-            with self.lock:
-                if self.runner is None:
-                    raise RuntimeError("Модель не загружена")
-                
-                with self.runner:
-                    input_name = self.runner.engine[0]
-                    output_name = self.runner.engine[1]
-                    
-                    start_time = time.time()
-                    
-                    try:
-                        if CUDA_AVAILABLE and self.stream is not None:
-                            # Асинхронное выполнение с CUDA stream
-                            outputs = self.runner.infer({input_name: input_tensor})
-                            self.stream.synchronize()
-                        else:
-                            # Синхронное выполнение
-                            outputs = self.runner.infer({input_name: input_tensor})
-                        
-                        inference_time = time.time() - start_time
-                        
-                    except Exception as e:
-                        print(f"✗ Ошибка inference в модели {self.engine_path}: {e}")
-                        # Пробуем синхронное выполнение как fallback
-                        if CUDA_AVAILABLE and self.stream is not None:
-                            print("Пробуем синхронное выполнение...")
-                            outputs = self.runner.infer({input_name: input_tensor})
-                            inference_time = time.time() - start_time
-                        else:
-                            raise
+            for i in range(0, len(images), max_batch_size):
+                batch_images = images[i:i + max_batch_size]
+                batch_output, batch_time = self._run_single_batch(batch_images, image_size)
+                all_outputs.append(batch_output)
+                total_inference_time += batch_time
             
-            return outputs[output_name], inference_time
+            # Объединяем результаты всех batch
+            final_output = np.concatenate(all_outputs, axis=0)
+            
+            return final_output, total_inference_time
             
         except Exception as e:
             print(f"✗ Критическая ошибка в run_batch: {e}")
             raise
+    
+    def _run_single_batch(self, images: List[np.ndarray], image_size: int) -> Tuple[np.ndarray, float]:
+        """Выполнение одного batch изображений"""
+        # Подготовка батча
+        batch = []
+        for img in images:
+            if isinstance(img, np.ndarray):
+                img_resized = cv2.resize(img, (image_size, image_size))
+                img_normalized = img_resized.transpose(2, 0, 1).astype(np.float32) / 255.0
+                batch.append(img_normalized)
+        
+        input_tensor = np.stack(batch)  # [N, 3, H, W]
+        
+        # Выполнение inference
+        with self.lock:
+            if self.runner is None:
+                raise RuntimeError("Модель не загружена")
+            
+            with self.runner:
+                input_name = self.runner.engine[0]
+                output_name = self.runner.engine[1]
+                
+                start_time = time.time()
+                
+                try:
+                    if CUDA_AVAILABLE and self.stream is not None:
+                        # Асинхронное выполнение с CUDA stream
+                        outputs = self.runner.infer({input_name: input_tensor})
+                        self.stream.synchronize()
+                    else:
+                        # Синхронное выполнение
+                        outputs = self.runner.infer({input_name: input_tensor})
+                    
+                    inference_time = time.time() - start_time
+                    
+                except Exception as e:
+                    print(f"✗ Ошибка inference в модели {self.engine_path}: {e}")
+                    # Пробуем синхронное выполнение как fallback
+                    if CUDA_AVAILABLE and self.stream is not None:
+                        print("Пробуем синхронное выполнение...")
+                        outputs = self.runner.infer({input_name: input_tensor})
+                        inference_time = time.time() - start_time
+                    else:
+                        raise
+        
+        return outputs[output_name], inference_time
 
 
 class ParallelTensorRTManager:

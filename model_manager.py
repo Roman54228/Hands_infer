@@ -19,7 +19,7 @@ def predict_gestures_process(crops: List[np.ndarray], model_path: str, image_siz
     """Функция для предсказания жестов в отдельном процессе"""
     try:
         model = load_hand_gesture_model(model_path)
-        output = run_model_batch(crops, model, image_size=image_size)
+        output = run_model_batch(crops, model, image_size=image_size, max_batch_size=4)
         predictions = [pred.argmax() for pred in output[0]]
         return predictions
     except Exception as e:
@@ -31,7 +31,7 @@ def predict_keypoints_process(crops: List[np.ndarray], model_path: str, image_si
     """Функция для предсказания ключевых точек в отдельном процессе"""
     try:
         model = load_hand_gesture_model(model_path)
-        output = run_model_batch(crops, model, image_size=image_size)
+        output = run_model_batch(crops, model, image_size=image_size, max_batch_size=4)
         keypoints = []
         for pred in output[0]:
             # Нормализация координат
@@ -63,7 +63,7 @@ class ThreadSafeTensorRTModel:
         with self.lock:
             if self.model is None:
                 self._load_model()
-            return run_model_batch(crops, self.model, image_size)
+            return run_model_batch(crops, self.model, image_size, max_batch_size=4)
 
 
 class ModelManager:
@@ -164,7 +164,7 @@ class ModelManager:
             return []
         
         try:
-            output = run_model_batch(crops, self.hand_gesture_model, image_size=image_size)
+            output = run_model_batch(crops, self.hand_gesture_model, image_size=image_size, max_batch_size=4)
             predictions = [pred.argmax() for pred in output[0]]
             return predictions
         except Exception as e:
@@ -177,7 +177,7 @@ class ModelManager:
             return []
         
         try:
-            output = run_model_batch(crops, self.kps_model, image_size=image_size)
+            output = run_model_batch(crops, self.kps_model, image_size=image_size, max_batch_size=4)
             keypoints = []
             for pred in output[0]:
                 # Нормализация координат
@@ -304,8 +304,8 @@ class ModelManager:
         if not crops:
             return [], []
         
-        # Используем батчинг для ускорения
-        batch_size = min(8, len(crops))  # Ограничиваем размер батча
+        # Используем батчинг для ускорения с учетом ограничений TensorRT
+        batch_size = min(4, len(crops))  # Ограничиваем размер батча до 4 для совместимости с TensorRT профилями
         
         gesture_predictions = []
         keypoint_predictions = []
@@ -316,7 +316,7 @@ class ModelManager:
             
             # Предсказание жестов
             try:
-                output_gestures = run_model_batch(batch_crops, self.hand_gesture_model, image_size=224)
+                output_gestures = run_model_batch(batch_crops, self.hand_gesture_model, image_size=224, max_batch_size=4)
                 batch_gestures = [pred.argmax() for pred in output_gestures[0]]
                 gesture_predictions.extend(batch_gestures)
             except Exception as e:
@@ -325,7 +325,7 @@ class ModelManager:
             
             # Предсказание ключевых точек
             try:
-                output_keypoints = run_model_batch(batch_crops, self.kps_model, image_size=256)
+                output_keypoints = run_model_batch(batch_crops, self.kps_model, image_size=256, max_batch_size=4)
                 batch_keypoints = []
                 for pred in output_keypoints[0]:
                     kps = np.expand_dims(pred, 0)[:, :, :2] * 256
@@ -340,7 +340,7 @@ class ModelManager:
     def _predict_gestures_batch(self, crops: List[np.ndarray], image_size) -> List[int]:
         """Внутренний метод для предсказания жестов"""
         try:
-            output = run_model_batch(crops, self.hand_gesture_model, image_size=image_size)
+            output = run_model_batch(crops, self.hand_gesture_model, image_size=image_size, max_batch_size=4)
             predictions = [pred.argmax() for pred in output[0]]
             return predictions
         except Exception as e:
@@ -350,7 +350,7 @@ class ModelManager:
     def _predict_keypoints_batch(self, crops: List[np.ndarray]) -> List[np.ndarray]:
         """Внутренний метод для предсказания ключевых точек"""
         try:
-            output = run_model_batch(crops, self.kps_model, image_size=self.crop_size)
+            output = run_model_batch(crops, self.kps_model, image_size=self.crop_size, max_batch_size=4)
             keypoints = []
             for pred in output[0]:
                 # Нормализация координат
