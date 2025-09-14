@@ -62,6 +62,10 @@ class ModelManager:
         
         for i, box in enumerate(results[0].boxes.xyxy):
             x1, y1, x2, y2 = map(int, box.tolist())
+            # x1 -= 30
+            # x2 += 30
+            # y1 -= 30
+            # y2 += 30
             detections.append((x1, y1, x2, y2))
         
         return detections
@@ -77,30 +81,30 @@ class ModelManager:
         
         return crops
     
-    def predict_gestures(self, crops: List[np.ndarray]) -> List[int]:
+    def predict_gestures(self, crops: List[np.ndarray], image_size) -> List[int]:
         """Предсказание жестов для обрезанных изображений рук"""
         if not crops or self.hand_gesture_model is None:
             return []
         
         try:
-            output = run_model_batch(crops, self.hand_gesture_model, image_size=self.crop_size)
+            output = run_model_batch(crops, self.hand_gesture_model, image_size=image_size)
             predictions = [pred.argmax() for pred in output[0]]
             return predictions
         except Exception as e:
             print(f"Error predicting gestures: {e}")
             return []
     
-    def predict_keypoints(self, crops: List[np.ndarray]) -> List[np.ndarray]:
+    def predict_keypoints(self, crops: List[np.ndarray], image_size) -> List[np.ndarray]:
         """Предсказание ключевых точек рук"""
         if not crops or self.kps_model is None:
             return []
         
         try:
-            output = run_model_batch(crops, self.kps_model, image_size=self.crop_size)
+            output = run_model_batch(crops, self.kps_model, image_size=image_size)
             keypoints = []
             for pred in output[0]:
                 # Нормализация координат
-                kps = np.expand_dims(pred, 0)[:, :, :2] * self.crop_size
+                kps = np.expand_dims(pred, 0)[:, :, :2] * image_size
                 keypoints.append(kps[0])
             return keypoints
         except Exception as e:
@@ -114,7 +118,7 @@ class ModelManager:
         
         if self.hand_gesture_model is None or self.kps_model is None:
             return [], []
-        
+        breakpoint()
         gesture_predictions = []
         keypoint_predictions = []
         
@@ -122,8 +126,8 @@ class ModelManager:
             # Используем ThreadPoolExecutor для параллельного выполнения
             with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
                 # Запускаем обе модели параллельно
-                future_gestures = executor.submit(self._predict_gestures_batch, crops)
-                future_keypoints = executor.submit(self._predict_keypoints_batch, crops)
+                future_gestures = executor.submit(self.predict_gestures, crops, 224)
+                future_keypoints = executor.submit(self.predict_keypoints, crops, 256)
                 
                 # Ждем результаты
                 gesture_predictions = future_gestures.result()
@@ -139,17 +143,19 @@ class ModelManager:
     
     def predict_gestures_and_keypoints(self, crops: List[np.ndarray]) -> Tuple[List[int], List[np.ndarray]]:
         """Универсальный метод для предсказания жестов и ключевых точек"""
+        self.use_parallel = True
         if self.use_parallel:
             return self.predict_gestures_and_keypoints_parallel(crops)
         else:
-            gestures = self.predict_gestures(crops)
-            keypoints = self.predict_keypoints(crops)
+            # breakpoint()
+            gestures = self.predict_gestures(crops, image_size=224)
+            keypoints = self.predict_keypoints(crops, image_size=256)
             return gestures, keypoints
     
-    def _predict_gestures_batch(self, crops: List[np.ndarray]) -> List[int]:
+    def _predict_gestures_batch(self, crops: List[np.ndarray], image_size) -> List[int]:
         """Внутренний метод для предсказания жестов"""
         try:
-            output = run_model_batch(crops, self.hand_gesture_model, image_size=self.crop_size)
+            output = run_model_batch(crops, self.hand_gesture_model, image_size=image_size)
             predictions = [pred.argmax() for pred in output[0]]
             return predictions
         except Exception as e:

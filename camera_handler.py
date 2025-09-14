@@ -3,7 +3,7 @@
 """
 import numpy as np
 import cv2
-import pyvidu as vidu
+# import pyvidu as vidu
 import time
 from typing import Tuple, Optional, List
 

@@ -124,6 +124,7 @@ class CoordinateTransformer:
         pixel = pixel.reshape(-1, 1, 2)
         
         # Устранение дисторсии
+        breakpoint()
         pixel = cv2.undistortPoints(pixel, self.K, self.dist, P=self.K)
         
         x_norm, y_norm = pixel[0][0]

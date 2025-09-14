@@ -30,7 +30,7 @@ class HandDetectionApp:
             yolo_model_path, 
             hand_gesture_model_path, 
             kps_model_path,
-            use_parallel=True,  # Включить параллельный инференс
+            use_parallel=False,  # Включить параллельный инференс
             parallel_workers=2  # Количество потоков
         )
         self.detector = DetectionProcessor(osc_ip, osc_port)
@@ -85,15 +85,12 @@ class HandDetectionApp:
                     
                     # Обработка только каждого N-го кадра для производительности
                     if not self.detector.should_process_frame():
-                        self._display_frame(frame)
                         continue
                     
                     # Обработка кадра
                     processed_frame = self._process_frame(frame)
                     
-                    # Отображение результата
-                    self._display_frame(processed_frame)
-                    
+                                      
                     # Обработка клавиш
                     if self._handle_keyboard_input():
                         break
@@ -115,13 +112,13 @@ class HandDetectionApp:
             return draw_image
         
         # Ограничиваем количество детекций для производительности
-        detections = detections[:1]
+        detections = detections[:4]
         
         # Обрезка изображений рук
         crops = self.models.crop_hands(frame, detections)
         if not crops:
             return draw_image
-        
+        # breakpoint()
         # Предсказание жестов и ключевых точек (параллельно или последовательно)
         gesture_predictions, keypoint_predictions = self.models.predict_gestures_and_keypoints(crops)
         
@@ -135,13 +132,12 @@ class HandDetectionApp:
             keypoints = keypoint_predictions[i]
             
             # Отправка данных через OSC
-            bbox_points = self.coord_transformer.create_bbox_points(x1, y1, x2, y2)
-            self.detector.send_bbox_data(bbox_points, i)
+            # bbox_points = self.coord_transformer.create_bbox_points(x1, y1, x2, y2)
+            # self.detector.send_bbox_data(bbox_points, i)
             
             # Отрисовка ключевых точек
             color = self.models.get_gesture_color(gesture_id)
             draw_image = self.models.draw_keypoints(draw_image, keypoints, bbox, color)
-            
             # Получение мировых координат для кончика указательного пальца (точка 4)
             if len(keypoints) > 4:
                 kp_x, kp_y = keypoints[4]
@@ -155,12 +151,12 @@ class HandDetectionApp:
                 # )
                 
                 # Текущий метод без глубины (гомография для Z=0)
-                world_x, world_y = self.coord_transformer.get_world_coordinates_for_keypoint(
+                world_x, world_y = self.coord_transformer.get_worlcoordinates_for_keypoint(
                     abs_kp_x, abs_kp_y
                 )
                 
                 # Отрисовка мировых координат
-                self.detector.draw_world_coordinates(draw_image, world_x, world_y, color)
+                self.detector.draw_world_coordinates(draw_image, world_x, world_y, color, i)
             
             # Отрисовка информации о детекции
             draw_image = self.detector.draw_detection_info(
@@ -172,9 +168,9 @@ class HandDetectionApp:
         
         return draw_image
     
-    def _display_frame(self, frame: np.ndarray):
-        """Отображение кадра"""
-        cv2.imshow("Hand Detection", frame)
+    # def _display_frame(self, frame: np.ndarray):
+    #     """Отображение кадра"""
+    #     cv2.imshow("Hand Detection", frame)
     
     def _handle_keyboard_input(self) -> bool:
         """Обработка ввода с клавиатуры"""

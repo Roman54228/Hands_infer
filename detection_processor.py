@@ -69,9 +69,9 @@ class DetectionProcessor:
         return image
     
     def draw_world_coordinates(self, image: np.ndarray, world_x: float, world_y: float,
-                             color: Tuple[int, int, int]):
+                             color: Tuple[int, int, int], index_frame):
         """Отрисовка мировых координат на изображении"""
-        cv2.putText(image, f'{world_x:.1f} {world_y:.1f}', (50, 50),
+        cv2.putText(image, f'{world_x:.1f} {world_y:.1f}', (50, 50 + index_frame * 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
     
     def save_debug_image(self, image: np.ndarray, filename_prefix: str = "roma_images"):
