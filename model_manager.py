@@ -4,11 +4,65 @@
 import numpy as np
 import cv2
 from typing import List, Tuple, Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 import time
+import threading
+import queue
+import multiprocessing as mp
 from ultralytics import YOLO
 from run_trt import load_hand_gesture_model, predict_hand_gesture
 from new_speed_bench import run_model_batch
+
+
+def predict_gestures_process(crops: List[np.ndarray], model_path: str, image_size: int = 224) -> List[int]:
+    """Функция для предсказания жестов в отдельном процессе"""
+    try:
+        model = load_hand_gesture_model(model_path)
+        output = run_model_batch(crops, model, image_size=image_size)
+        predictions = [pred.argmax() for pred in output[0]]
+        return predictions
+    except Exception as e:
+        print(f"Error in gesture process: {e}")
+        return []
+
+
+def predict_keypoints_process(crops: List[np.ndarray], model_path: str, image_size: int = 256) -> List[np.ndarray]:
+    """Функция для предсказания ключевых точек в отдельном процессе"""
+    try:
+        model = load_hand_gesture_model(model_path)
+        output = run_model_batch(crops, model, image_size=image_size)
+        keypoints = []
+        for pred in output[0]:
+            # Нормализация координат
+            kps = np.expand_dims(pred, 0)[:, :, :2] * image_size
+            keypoints.append(kps[0])
+        return keypoints
+    except Exception as e:
+        print(f"Error in keypoints process: {e}")
+        return []
+
+
+class ThreadSafeTensorRTModel:
+    """Thread-safe обертка для TensorRT модели"""
+    
+    def __init__(self, engine_path: str):
+        self.engine_path = engine_path
+        self.model = None
+        self.lock = threading.Lock()
+        self._load_model()
+    
+    def _load_model(self):
+        """Загрузка модели в отдельном потоке"""
+        with self.lock:
+            if self.model is None:
+                self.model = load_hand_gesture_model(self.engine_path)
+    
+    def predict(self, crops: List[np.ndarray], image_size: int = 256):
+        """Thread-safe предсказание"""
+        with self.lock:
+            if self.model is None:
+                self._load_model()
+            return run_model_batch(crops, self.model, image_size)
 
 
 class ModelManager:
@@ -22,6 +76,14 @@ class ModelManager:
         self.crop_size = 256
         self.use_parallel = use_parallel
         self.parallel_workers = parallel_workers
+        
+        # Сохраняем пути к моделям для использования в процессах
+        self.hand_gesture_model_path = hand_gesture_model_path
+        self.kps_model_path = kps_model_path
+        
+        # Thread-safe модели для параллельного выполнения
+        self.thread_safe_gesture_model = None
+        self.thread_safe_kps_model = None
         
         # Цвета для разных классов жестов
         self.gesture_colors = {
@@ -45,6 +107,12 @@ class ModelManager:
             
             print("Loading keypoints model...")
             self.kps_model = load_hand_gesture_model(kps_path)
+            
+            # Создаем thread-safe версии для параллельного выполнения
+            if self.use_parallel:
+                print("Creating thread-safe models for parallel execution...")
+                self.thread_safe_gesture_model = ThreadSafeTensorRTModel(hand_gesture_path)
+                self.thread_safe_kps_model = ThreadSafeTensorRTModel(kps_path)
             
             print("All models loaded successfully!")
             
@@ -112,22 +180,29 @@ class ModelManager:
             return []
     
     def predict_gestures_and_keypoints_parallel(self, crops: List[np.ndarray]) -> Tuple[List[int], List[np.ndarray]]:
-        """Параллельное предсказание жестов и ключевых точек"""
+        """Параллельное предсказание жестов и ключевых точек с использованием процессов"""
         if not crops:
             return [], []
         
-        if self.hand_gesture_model is None or self.kps_model is None:
-            return [], []
-        breakpoint()
         gesture_predictions = []
         keypoint_predictions = []
         
         try:
-            # Используем ThreadPoolExecutor для параллельного выполнения
-            with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
-                # Запускаем обе модели параллельно
-                future_gestures = executor.submit(self.predict_gestures, crops, 224)
-                future_keypoints = executor.submit(self.predict_keypoints, crops, 256)
+            # Используем ProcessPoolExecutor для избежания конфликтов CUDA контекстов
+            with ProcessPoolExecutor(max_workers=2) as executor:
+                # Запускаем обе модели параллельно в разных процессах
+                future_gestures = executor.submit(
+                    predict_gestures_process, 
+                    crops, 
+                    self.hand_gesture_model_path, 
+                    224
+                )
+                future_keypoints = executor.submit(
+                    predict_keypoints_process, 
+                    crops, 
+                    self.kps_model_path, 
+                    256
+                )
                 
                 # Ждем результаты
                 gesture_predictions = future_gestures.result()
@@ -136,18 +211,60 @@ class ModelManager:
         except Exception as e:
             print(f"Error in parallel prediction: {e}")
             # Fallback к последовательному выполнению
-            gesture_predictions = self.predict_gestures(crops)
-            keypoint_predictions = self.predict_keypoints(crops)
+            gesture_predictions = self.predict_gestures(crops, 224)
+            keypoint_predictions = self.predict_keypoints(crops, 256)
         
         return gesture_predictions, keypoint_predictions
     
+    def predict_gestures_and_keypoints_parallel_threads(self, crops: List[np.ndarray]) -> Tuple[List[int], List[np.ndarray]]:
+        """Параллельное предсказание жестов и ключевых точек с использованием потоков (альтернативный метод)"""
+        if not crops:
+            return [], []
+        
+        if self.hand_gesture_model is None or self.kps_model is None:
+            return [], []
+        
+        gesture_predictions = []
+        keypoint_predictions = []
+        
+        try:
+            # Используем ThreadPoolExecutor с thread-safe моделями
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                # Запускаем обе модели параллельно
+                future_gestures = executor.submit(self._predict_gestures_thread_safe, crops, 224)
+                future_keypoints = executor.submit(self._predict_keypoints_thread_safe, crops, 256)
+                
+                # Ждем результаты
+                gesture_predictions = future_gestures.result()
+                keypoint_predictions = future_keypoints.result()
+                
+        except Exception as e:
+            print(f"Error in parallel thread prediction: {e}")
+            # Fallback к последовательному выполнению
+            gesture_predictions = self.predict_gestures(crops, 224)
+            keypoint_predictions = self.predict_keypoints(crops, 256)
+        
+        return gesture_predictions, keypoint_predictions
+    
+    def _predict_gestures_thread_safe(self, crops: List[np.ndarray], image_size: int) -> List[int]:
+        """Thread-safe предсказание жестов"""
+        if self.thread_safe_gesture_model is None:
+            return self.predict_gestures(crops, image_size)
+        return self.thread_safe_gesture_model.predict(crops, image_size)
+    
+    def _predict_keypoints_thread_safe(self, crops: List[np.ndarray], image_size: int) -> List[np.ndarray]:
+        """Thread-safe предсказание ключевых точек"""
+        if self.thread_safe_kps_model is None:
+            return self.predict_keypoints(crops, image_size)
+        return self.thread_safe_kps_model.predict(crops, image_size)
+    
     def predict_gestures_and_keypoints(self, crops: List[np.ndarray]) -> Tuple[List[int], List[np.ndarray]]:
         """Универсальный метод для предсказания жестов и ключевых точек"""
-        self.use_parallel = True
         if self.use_parallel:
+            # Используем ProcessPoolExecutor для избежания конфликтов CUDA
             return self.predict_gestures_and_keypoints_parallel(crops)
         else:
-            # breakpoint()
+            # Последовательное выполнение
             gestures = self.predict_gestures(crops, image_size=224)
             keypoints = self.predict_keypoints(crops, image_size=256)
             return gestures, keypoints
