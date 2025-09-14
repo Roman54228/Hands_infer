@@ -201,7 +201,7 @@ class ParallelTensorRTManager:
                 
                 def run_gestures():
                     try:
-                        output, _ = self.gesture_runner.run_batch(crops, image_size=224)
+                        output, _ = self.gesture_runner.run_batch(crops, image_size=224, max_batch_size=4)
                         gesture_results[0] = [pred.argmax() for pred in output]
                     except Exception as e:
                         gesture_error[0] = e
@@ -209,7 +209,7 @@ class ParallelTensorRTManager:
                 
                 def run_keypoints():
                     try:
-                        output, _ = self.keypoints_runner.run_batch(crops, image_size=256)
+                        output, _ = self.keypoints_runner.run_batch(crops, image_size=256, max_batch_size=4)
                         keypoints = []
                         for pred in output:
                             kps = np.expand_dims(pred, 0)[:, :, :2] * 256
@@ -252,7 +252,7 @@ class ParallelTensorRTManager:
         try:
             # Предсказание жестов
             if self.gesture_runner.is_initialized():
-                gesture_output, _ = self.gesture_runner.run_batch(crops, image_size=224)
+                gesture_output, _ = self.gesture_runner.run_batch(crops, image_size=224, max_batch_size=4)
                 gesture_predictions = [pred.argmax() for pred in gesture_output]
             else:
                 print("⚠ Модель жестов недоступна")
@@ -260,7 +260,7 @@ class ParallelTensorRTManager:
             
             # Предсказание ключевых точек
             if self.keypoints_runner.is_initialized():
-                keypoint_output, _ = self.keypoints_runner.run_batch(crops, image_size=256)
+                keypoint_output, _ = self.keypoints_runner.run_batch(crops, image_size=256, max_batch_size=4)
                 keypoint_predictions = []
                 for pred in keypoint_output:
                     kps = np.expand_dims(pred, 0)[:, :, :2] * 256
