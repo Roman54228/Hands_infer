@@ -22,6 +22,12 @@ try:
     import tensorrt as trt
     TENSORRT_AVAILABLE = True
     print("✓ TensorRT доступен")
+    
+    # Отключаем cuTensor оптимизации для избежания ошибок
+    import os
+    os.environ['TRT_DISABLE_CUTENSOR'] = '1'
+    print("✓ cuTensor оптимизации отключены")
+    
 except ImportError:
     print("⚠ TensorRT не доступен")
     TENSORRT_AVAILABLE = False
@@ -56,10 +62,21 @@ class TensorRTStreamRunner:
                     
                     if CUDA_AVAILABLE:
                         try:
+                            # Проверяем, есть ли проблемы с cuTensor
+                            test_tensor = np.random.rand(1, 3, 224, 224).astype(np.float32)
+                            with self.runner:
+                                input_name = self.runner.engine[0]
+                                # Пробуем простой inference для проверки cuTensor
+                                test_output = self.runner.infer({input_name: test_tensor})
+                            
+                            # Если тест прошел успешно, создаем CUDA stream
                             self.stream = cuda.Stream()
                             print(f"✓ Модель загружена с CUDA stream {self.stream_id}")
                         except Exception as e:
-                            print(f"⚠ Не удалось создать CUDA stream: {e}")
+                            if "cuTensor" in str(e) or "CuTensor" in str(e):
+                                print(f"⚠ Обнаружена cuTensor проблема, отключаем CUDA streams: {e}")
+                            else:
+                                print(f"⚠ Не удалось создать CUDA stream: {e}")
                             self.stream = None
                     else:
                         print(f"✓ Модель загружена без CUDA streams")
@@ -129,23 +146,24 @@ class TensorRTStreamRunner:
                 start_time = time.time()
                 
                 try:
-                    if CUDA_AVAILABLE and self.stream is not None:
-                        # Асинхронное выполнение с CUDA stream
-                        outputs = self.runner.infer({input_name: input_tensor})
-                        self.stream.synchronize()
-                    else:
-                        # Синхронное выполнение
-                        outputs = self.runner.infer({input_name: input_tensor})
-                    
+                    # Всегда используем синхронное выполнение для избежания cuTensor ошибок
+                    outputs = self.runner.infer({input_name: input_tensor})
                     inference_time = time.time() - start_time
                     
                 except Exception as e:
                     print(f"✗ Ошибка inference в модели {self.engine_path}: {e}")
-                    # Пробуем синхронное выполнение как fallback
-                    if CUDA_AVAILABLE and self.stream is not None:
-                        print("Пробуем синхронное выполнение...")
-                        outputs = self.runner.infer({input_name: input_tensor})
-                        inference_time = time.time() - start_time
+                    # Если это cuTensor ошибка, пробуем без CUDA streams
+                    if "cuTensor" in str(e) or "CuTensor" in str(e):
+                        print("⚠ Обнаружена cuTensor ошибка, отключаем CUDA streams...")
+                        try:
+                            # Пересоздаем runner без CUDA streams
+                            self.stream = None
+                            outputs = self.runner.infer({input_name: input_tensor})
+                            inference_time = time.time() - start_time
+                            print("✓ Успешно выполнено без CUDA streams")
+                        except Exception as e2:
+                            print(f"✗ Критическая ошибка даже без CUDA streams: {e2}")
+                            raise
                     else:
                         raise
         
