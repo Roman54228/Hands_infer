@@ -4,7 +4,10 @@ import os
 import glob
 from typing import List, Optional
 import numpy as np
+import shutil
 
+shutil.rmtree('roma_images')
+os.makedirs('roma_images')
 
 class DebugHandDetectionApp(HandDetectionApp):
     """Версия приложения для отладки с локальными изображениями"""
@@ -131,8 +134,8 @@ class DebugHandDetectionApp(HandDetectionApp):
                 cv2.putText(processed_frame, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                 
                 # Отображение результата
-                cv2.imshow("Debug Hand Detection", processed_frame)
-                
+                cv2.imwrite(f'roma_images/{self.current_image_index}.jpg', processed_frame)
+                self.current_image_index += 1
                 # Обработка клавиш
                 if self._handle_keyboard_input():
                     break
@@ -148,6 +151,7 @@ class DebugHandDetectionApp(HandDetectionApp):
         """Загрузка изображения из файла"""
         try:
             frame = cv2.imread(image_path)
+            frame = cv2.flip(frame, -1)
             if frame is None:
                 print(f"Could not load image: {image_path}")
                 return None
@@ -197,16 +201,16 @@ class DebugHandDetectionApp(HandDetectionApp):
 def main():
     """Главная функция отладочного приложения"""
     # Конфигурация путей к моделям
-    yolo_model_path = "/home/cineai/ViduSdk/python/TRT_Roma/newone/upside.engine"
-    hand_gesture_model_path = "my_model.engine"
-    kps_model_path = "cls_kps.engine"
+    yolo_model_path = "upside.engine"
+    hand_gesture_model_path = "best_cls_kps.engine"
+    kps_model_path = "kps.engine"
     
     # Конфигурация OSC
     osc_ip = "10.0.0.101"
     osc_port = 5055
     
     # Папка с изображениями для отладки
-    images_folder = "debug_images"
+    images_folder = "krasota_pinch"
     
     # Создание и запуск отладочного приложения
     app = DebugHandDetectionApp(
