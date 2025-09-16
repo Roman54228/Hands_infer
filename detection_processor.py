@@ -65,6 +65,8 @@ class DetectionProcessor:
         # Отрисовка ID трека
         cv2.putText(image, f'id:{track_id}', (x1, y1 - 10),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        # breakpoint()
+        cv2.circle(image, (int(image.shape[1] // 2), int(image.shape[0] // 2)), 5, (255,0,0), -1, )
         
         return image
     

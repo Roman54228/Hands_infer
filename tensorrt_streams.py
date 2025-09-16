@@ -36,13 +36,14 @@ except ImportError:
 class TensorRTStreamRunner:
     """Класс для выполнения TensorRT моделей с использованием CUDA streams"""
     
-    def __init__(self, engine_path: str, stream_id: int = 0):
+    def __init__(self, engine_path: str, stream_id: int = 0, image_size = 224):
         self.engine_path = engine_path
         self.stream_id = stream_id
         self.runner = None
         self.stream = None
         self.lock = threading.Lock()
         self.initialization_error = None
+        self.image_size = image_size
         self._initialize()
     
     def _initialize(self):
@@ -63,7 +64,7 @@ class TensorRTStreamRunner:
                     if CUDA_AVAILABLE:
                         try:
                             # Проверяем, есть ли проблемы с cuTensor
-                            test_tensor = np.random.rand(1, 3, 224, 224).astype(np.float32)
+                            test_tensor = np.random.rand(1, 3, self.image_size, self.image_size).astype(np.float32)
                             with self.runner:
                                 input_name = self.runner.engine[0]
                                 # Пробуем простой inference для проверки cuTensor
@@ -179,8 +180,8 @@ class ParallelTensorRTManager:
         
         # Создаем отдельные runners для каждой модели
         print("Инициализация ParallelTensorRTManager...")
-        self.gesture_runner = TensorRTStreamRunner(gesture_model_path, stream_id=0)
-        self.keypoints_runner = TensorRTStreamRunner(keypoints_model_path, stream_id=1)
+        self.gesture_runner = TensorRTStreamRunner(gesture_model_path, stream_id=0, image_size=224)
+        self.keypoints_runner = TensorRTStreamRunner(keypoints_model_path, stream_id=1, image_size=256)
         
         # Проверяем успешность инициализации
         if self.gesture_runner.is_initialized() and self.keypoints_runner.is_initialized():

@@ -55,7 +55,7 @@ class DebugHandDetectionApp(HandDetectionApp):
             yolo_model_path, 
             hand_gesture_model_path, 
             kps_model_path,
-            use_parallel=True,
+            use_parallel=False,
             parallel_workers=2
         )
         self.detector = DetectionProcessor(self.osc_ip, self.osc_port)
@@ -119,6 +119,7 @@ class DebugHandDetectionApp(HandDetectionApp):
             while self.running:
                 # Загрузка текущего изображения
                 current_image_path = self.image_paths[self.current_image_index]
+                # current_image_path = 'krasota_pinch/frame0003.png' 
                 frame = self._load_image(current_image_path)
                 
                 if frame is None:
@@ -201,7 +202,7 @@ class DebugHandDetectionApp(HandDetectionApp):
 def main():
     """Главная функция отладочного приложения"""
     # Конфигурация путей к моделям
-    yolo_model_path = "upside.engine"
+    yolo_model_path = "upside.onnx"
     hand_gesture_model_path = "best_cls_kps.engine"
     kps_model_path = "kps.engine"
     

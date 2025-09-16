@@ -86,9 +86,10 @@ class CoordinateTransformer:
         # y_cam = (v - cy) * z / fy
         fx, fy = self.K[0, 0], self.K[1, 1]
         cx, cy = self.K[0, 2], self.K[1, 2]
-        
-        x_cam = (x_norm - cx) * z / fx
-        y_cam = (y_norm - cy) * z / fy
+        x_cam = x_norm * z
+        y_cam = y_norm * z
+        # x_cam = (x_norm - cx) * z / fx
+        # y_cam = (y_norm - cy) * z / fy
         
         # 3D точка в системе координат камеры
         point_cam = np.array([x_cam, y_cam, z])
@@ -114,6 +115,7 @@ class CoordinateTransformer:
         Returns:
             Tuple[float, float]: Мировые координаты (X, Y)
         """
+        z = 2.51
         if z is not None:
             # Используем 3D преобразование с учетом глубины
             x, y, _ = self.pixel_to_world_3d(u, v, z)
@@ -124,7 +126,6 @@ class CoordinateTransformer:
         pixel = pixel.reshape(-1, 1, 2)
         
         # Устранение дисторсии
-        breakpoint()
         pixel = cv2.undistortPoints(pixel, self.K, self.dist, P=self.K)
         
         x_norm, y_norm = pixel[0][0]

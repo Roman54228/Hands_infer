@@ -96,7 +96,6 @@ def run_model_batch(images, runner: TrtRunner, image_size = 256, max_batch_size 
             batch.append(img)
 
         input_tensor = np.stack(batch)  # [N, 3, H, W]
-
         with runner:
             input_name = runner.engine[0]
             output_name = runner.engine[1]
@@ -104,7 +103,8 @@ def run_model_batch(images, runner: TrtRunner, image_size = 256, max_batch_size 
             start_time = time.time()
             outputs = runner.infer({input_name: input_tensor})
             inference_time = time.time() - start_time
-
+        if '794' in outputs:
+            return outputs[output_name], outputs['794'], inference_time  # [N, 21, 3]
         return outputs[output_name], inference_time  # [N, 21, 3]
     
     # Если изображений больше max_batch_size, разбиваем на части

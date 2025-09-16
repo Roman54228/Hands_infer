@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 from typing import Optional
 import os
+import time
 
 from camera_handler import CameraHandler
 from model_manager import ModelManager
@@ -120,8 +121,10 @@ class HandDetectionApp:
             return draw_image
         # breakpoint()
         # Предсказание жестов и ключевых точек (параллельно или последовательно)
+        st = time.time()
         gesture_predictions, keypoint_predictions = self.models.predict_gestures_and_keypoints(crops)
-        
+        end = time.time()
+        print(f'REC TIME TAKEN {end - st}')
         # Обработка каждой детекции
         for i, bbox in enumerate(detections):
             if i >= len(gesture_predictions) or i >= len(keypoint_predictions):
@@ -151,7 +154,7 @@ class HandDetectionApp:
                 # )
                 
                 # Текущий метод без глубины (гомография для Z=0)
-                world_x, world_y = self.coord_transformer.get_worlcoordinates_for_keypoint(
+                world_x, world_y = self.coord_transformer.pixel_to_world(
                     abs_kp_x, abs_kp_y
                 )
                 
