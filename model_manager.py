@@ -113,8 +113,8 @@ class ModelManager:
             self.hand_gesture_model = load_hand_gesture_model(hand_gesture_path)
             
             print("Loading keypoints model...")
-            # self.kps_model = load_hand_gesture_model(kps_path)
-            self.kps_model = load_hand_gesture_model('mm_kps.engine')
+            self.kps_model = load_hand_gesture_model(kps_path)
+            # self.kps_model = load_hand_gesture_model('mm_kps0.engine')
             # Создаем CUDA streams менеджер для параллельного выполнения
             if self.use_parallel:
                 print("Creating CUDA streams manager for parallel execution...")
@@ -142,10 +142,11 @@ class ModelManager:
         
         for i, box in enumerate(results[0].boxes.xyxy):
             x1, y1, x2, y2 = map(int, box.tolist())
-            # x1 -= 30
-            # x2 += 30
-            # y1 -= 30
-            # y2 += 30
+            pad = 15
+            # x1 -= pad
+            # x2 += pad
+            # y1 -= pad
+            # y2 += pad
             detections.append((x1, y1, x2, y2))
         
         return detections
@@ -302,17 +303,17 @@ class ModelManager:
             return self.predict_gestures_and_keypoints_parallel(crops)
         else:
             # Последовательное выполнение (надежное)
-            # gestures = self.predict_gestures(crops, image_size=224)
-            # keypoints = self.predict_keypoints(crops, image_size=256)
-            gestures, keypoints, _ = run_model_batch(crops, self.kps_model, image_size=256, max_batch_size=4)
-            kps_list = []
-            gestures = [pred.argmax() for pred in gestures] 
-            for pred in keypoints:
-                # Нормализация координат
-                kps = np.expand_dims(pred, 0)[:, :, :2] * 256
-                kps_list.append(kps[0])
-            # cls_output, kps_preds = output[0], output[1]
-            return gestures, kps_list
+            gestures = self.predict_gestures(crops, image_size=224)
+            keypoints = self.predict_keypoints(crops, image_size=256)
+            # gestures, keypoints, _ = run_model_batch(crops, self.kps_model, image_size=256, max_batch_size=4)
+            # kps_list = []
+            # gestures = [pred.argmax() for pred in gestures] 
+            # for pred in keypoints:
+            #     # Нормализация координат
+            #     kps = np.expand_dims(pred, 0)[:, :, :2] * 256
+            #     kps_list.append(kps[0])
+            # # cls_output, kps_preds = output[0], output[1]
+            return gestures, keypoints
     
     def predict_gestures_and_keypoints_optimized(self, crops: List[np.ndarray]) -> Tuple[List[int], List[np.ndarray]]:
         """Оптимизированное предсказание с батчингом (альтернатива параллельному выполнению)"""
